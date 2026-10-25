@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "overused-font",
+        "value": "inter",
+        "files": [
+          "src/style.css"
+        ],
+        "createdAt": "2026-10-25T01:05:45.296Z",
+        "reason": "Agent decision: Inter was deliberately chosen for this game's restrained interface and the approved mockup; preserve the existing typography rather than redesign it for a saturation warning."
+      }
+    ]
+  }
+}
