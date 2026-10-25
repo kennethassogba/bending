@@ -14,6 +14,10 @@ before(async () => {
   await db.exec(sql.slice(0, at).replace(/--[^\n]*/g, '').replace(/\n/g, ' '));
   await db.prepare(sql.slice(at)).run();
   await db.exec((await readFile('migrations/0008_bending_startups.sql', 'utf8')).replace(/--[^\n]*/g, '').replace(/\n/g, ' '));
+  const luna = await readFile('migrations/0009_bending_luna.sql', 'utf8');
+  const lunaTrigger = luna.indexOf('CREATE TRIGGER');
+  await db.exec(luna.slice(0, lunaTrigger).replace(/--[^\n]*/g, '').replace(/\n/g, ' '));
+  await db.prepare(luna.slice(lunaTrigger)).run();
 });
 after(async () => { await mf?.dispose(); });
 const request = async (path, data, headers = {}) => {
@@ -115,14 +119,13 @@ test('forged company, round, origin, invalid and oversized votes do not count', 
   assert.equal(resumed.votes.length, 0);
 });
 
-test('expired rounds reject votes and rate limiting returns a recoverable 429', async () => {
+test('expired rounds reject votes and no application quota is enforced', async () => {
   const round = await create();
   await db.prepare('UPDATE bending_rounds SET created_at=0 WHERE id=?').bind(round.id).run();
   assert.equal((await vote(round, 0)).status, 410);
   assert.equal((await request(`round?id=${round.id}`)).status, 410);
-  const response = await handleBending(new Request('http://localhost/bending/api/round', { method: 'POST', headers: { Origin: 'http://localhost' } }), { UPDATES_DB: db, BENDING_LIMITER: { limit: async () => ({ success: false }) } });
-  assert.equal(response.status, 429);
-  assert.equal(response.headers.get('Retry-After'), '60');
+  const response = await handleBending(new Request('http://localhost/bending/api/round', { method: 'POST', headers: { Origin: 'http://localhost', 'Content-Type':'application/json' }, body:'{}' }), { UPDATES_DB: db, BENDING_LIMITER: { limit: async () => ({ success: false }) } });
+  assert.equal(response.status, 201);
 });
 
 test('PWA assets exist and APIs opt out of caching', async () => {
@@ -134,4 +137,96 @@ test('PWA assets exist and APIs opt out of caching', async () => {
   const sw = await readFile('dist/sw.js', 'utf8');
   assert.ok(!sw.includes('__VERSION__'));
   assert.ok(sw.includes("url.pathname.startsWith('/bending/api/')"));
+});
+
+const decision = (round, duel, env = {}) => handleBending(new Request('http://localhost/bending/api/decision', {
+  method: 'POST', headers: { Origin: 'http://localhost', 'Content-Type': 'application/json' },
+  body: JSON.stringify({ roundId: round.id, duel }),
+}), { UPDATES_DB: db, OPENAI_API_KEY: 'test-only-key', ...env });
+
+async function withProvider(provider, run) {
+  const original = globalThis.fetch;
+  globalThis.fetch = (url, options) => String(url) === 'https://api.openai.com/v1/decisions'
+    ? provider(options) : original(url, options);
+  try { await run(); } finally { globalThis.fetch = original; }
+}
+
+test('Luna requires a saved human vote and never accepts a client-supplied choice', async () => {
+  const round = await create();
+  await withProvider(() => { assert.fail('No model request before the human vote'); }, async () => {
+    assert.equal((await decision(round, 0)).status, 409);
+    assert.equal((await decision(round, 8)).status, 400);
+    assert.equal((await decision({ id: crypto.randomUUID() }, 0)).status, 410);
+  });
+});
+
+test('Luna uses Decisions, ignores the human choice, preserves crowd Elo and counts retries once', async () => {
+  const round = await create();
+  await vote(round, 0);
+  const crowd = (await (await request('leaderboard')).json()).companies;
+  let calls = 0;
+  await withProvider(options => {
+    calls++;
+    const payload = JSON.parse(options.body);
+    assert.equal(payload.model, 'gpt-6-luna');
+    assert.equal(payload.questions[0].type, 'choice');
+    assert.deepEqual(payload.questions[0].choices.map(item => item.value), round.pairs[0]);
+    assert.ok(!payload.input.includes('winner'));
+    assert.ok(!JSON.stringify(payload).includes('rating'));
+    return Response.json({ id: 'decision-test', answers: [{ type: 'choice', name: 'acquisition', choice: round.pairs[0][1] }] });
+  }, async () => {
+    const first = await (await decision(round, 0)).json();
+    assert.equal(first.vote.winner, round.pairs[0][1]);
+    assert.equal((await decision(round, 0)).status, 200);
+    assert.equal(calls, 1);
+  });
+  const board = await (await request('leaderboard')).json();
+  assert.deepEqual(board.companies, crowd);
+  assert.equal(board.luna.votes, 1);
+  assert.equal(board.luna.companies.find(item => item.id === round.pairs[0][1]).rating, 1516);
+  assert.equal(board.luna.companies.reduce((sum, item) => sum + item.rating, 0), 60000);
+});
+
+test('concurrent Luna retries make only one provider call', async () => {
+  const round = await create(); await vote(round, 0);
+  let entered, finish;
+  const started = new Promise(resolve => { entered = resolve; });
+  const gate = new Promise(resolve => { finish = resolve; });
+  let calls = 0;
+  await withProvider(async () => {
+    calls++; entered(); await gate;
+    return Response.json({ answers: [{ type: 'choice', name: 'acquisition', choice: round.pairs[0][0] }] });
+  }, async () => {
+    const first = decision(round, 0);
+    await started;
+    try {
+      const others = await Promise.all(Array.from({ length: 4 }, () => decision(round, 0)));
+      assert.ok(others.every(response => response.status === 202));
+      assert.equal(calls, 1);
+    } finally { finish(); }
+    assert.equal((await first).status, 200);
+    assert.equal((await decision(round, 0)).status, 200);
+    assert.equal(calls, 1);
+  });
+});
+
+test('provider failures, refusals and invalid choices never create fake votes and remain retryable', async () => {
+  const round = await create(); await vote(round, 0);
+  const before = (await (await request('leaderboard')).json()).luna.votes;
+  for (const provider of [
+    () => new Response('limited', { status: 429 }),
+    () => { throw new Error('network'); },
+    () => Response.json({ answers: [{ type: 'refusal', name: 'acquisition' }] }),
+    () => Response.json({ answers: [{ type: 'choice', name: 'acquisition', choice: 'invented' }] }),
+  ]) await withProvider(provider, async () => {
+    assert.equal((await decision(round, 0)).status, 503);
+    assert.equal((await db.prepare('SELECT COUNT(*) AS count FROM bending_luna_requests WHERE round_id=?').bind(round.id).first()).count, 0);
+  });
+  assert.equal((await decision(round, 0, { OPENAI_API_KEY: '' })).status, 503);
+  const board = await (await request('leaderboard')).json();
+  assert.equal(board.luna.votes, before);
+  assert.equal((await (await request(`round?id=${round.id}`)).json()).votes.length, 1);
+  await withProvider(() => Response.json({ answers: [{ type: 'choice', name: 'acquisition', choice: round.pairs[0][0] }] }), async () => {
+    assert.equal((await decision(round, 0)).status, 200);
+  });
 });

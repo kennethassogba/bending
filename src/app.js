@@ -1,6 +1,6 @@
 import { byId } from './companies.js';
 import { spoon, bendSpoon } from './spoon.js';
-import { createShareCard, canShareCard, downloadCard, shareText } from './share-card.js';
+import { createShareCard, canShareCard, downloadCard, shareText, GAME_URL } from './share-card.js';
 import { alreadyBent } from './already-bent.js';
 
 const main = document.querySelector('main');
@@ -159,6 +159,7 @@ function showDuel() {
     <div class="duel"><span class="vs" aria-hidden="true">OR</span></div>
     <p class="duel-caption">Tap a spoon. Seal its fate.</p>
     <div class="game-status" role="status" aria-live="polite"></div>
+    <div class="duel-actions"></div>
   </section>`;
   const targets = main.querySelector('.duel');
   pair.forEach((id, i) => {
@@ -196,9 +197,11 @@ async function vote(winner, retry = false) {
       new Promise(resolve => setTimeout(resolve, matchMedia('(prefers-reduced-motion: reduce)').matches ? 250 : 1050)),
     ]);
     if (ticket !== epoch) return;
-    round.votes.push(data.vote); pending = false;
-    if (round.votes.length === 4) { store.remove(key); await showResults(); }
-    else { showDuel(); focusMain(); }
+    const duel = round.votes.length;
+    round.votes.push(data.vote);
+    target.append(node('span', 'vote-label', 'You'));
+    main.querySelector('.duel-caption').hidden = true;
+    await revealLuna(duel, ticket);
   } catch (error) {
     await animation;
     if (ticket !== epoch) return;
@@ -213,6 +216,49 @@ async function vote(winner, retry = false) {
   }
 }
 
+async function revealLuna(duel, ticket) {
+  if (ticket !== epoch) return;
+  pending = true;
+  const status = main.querySelector('.game-status');
+  const actions = main.querySelector('.duel-actions');
+  actions.replaceChildren();
+  status.className = 'game-status'; status.textContent = 'Luna is picking...';
+  try {
+    let data;
+    for (let attempt = 0; attempt < 12; attempt++) {
+      data = await api('decision', { method: 'POST', body: JSON.stringify({ roundId: round.id, duel }) });
+      if (ticket !== epoch) return;
+      if (!data.pending) break;
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      if (ticket !== epoch) return;
+    }
+    if (!data.vote || !round.pairs[duel].includes(data.vote.winner)) throw new Error('Luna is unavailable. Try again.');
+    const pick = main.querySelector(`[data-company="${data.vote.winner}"]`);
+    pick.classList.add('luna-selected');
+    const label = pick.querySelector('.vote-label');
+    if (label) label.textContent = 'You + Luna';
+    else pick.append(node('span', 'vote-label', 'Luna'));
+    status.textContent = `Luna / Decision picked ${byId[data.vote.winner].name}.`;
+    say(status.textContent);
+  } catch {
+    if (ticket !== epoch) return;
+    status.textContent = 'Luna is unavailable.';
+    const retry = node('button', 'text-action', 'Retry Luna');
+    retry.addEventListener('click', () => revealLuna(duel, ticket));
+    actions.append(retry);
+  }
+  if (ticket !== epoch) return;
+  pending = false;
+  const next = node('button', 'primary', round.votes.length === 4 ? 'See rankings' : 'Next duel');
+  next.innerHTML += arrow;
+  next.addEventListener('click', async () => {
+    if (round.votes.length === 4) { store.remove(key); await showResults(); }
+    else { showDuel(); focusMain(); }
+  });
+  actions.append(next);
+  next.focus({ preventScroll: true });
+}
+
 async function showResults() {
   const ticket = ++epoch; view = 'results'; pending = false;
   releaseCard();
@@ -222,10 +268,24 @@ async function showResults() {
     <div class="card-preview" id="card-preview"><p role="status">Making your card...</p></div>
     <div class="card-actions"><button class="primary" id="share-card" disabled>Making your card...</button><button class="share" id="download-card" aria-label="Download your card" hidden>${downloadIcon}</button></div>
     <p class="results-status" id="share-status" role="status"></p>
-    <section class="leaderboard" aria-labelledby="board-title"><h2 id="board-title">The crowd's picks</h2><div id="leaderboard-content"><p class="results-status" role="status">Loading leaderboard...</p></div></section>
-    <div class="results-actions"><button class="secondary" id="again">Bend some more${arrow}</button></div>
+    <section class="leaderboard" aria-labelledby="board-title"><h2 id="board-title">Rankings</h2><div id="leaderboard-content"><p class="results-status" role="status">Loading leaderboards...</p></div></section>
+    <div class="results-actions"><button class="secondary" id="again">Bend some more${arrow}</button><button class="share" id="share-app" aria-label="Share app">${shareIcon}</button><p class="results-status app-share-status" id="app-share-status" role="status" hidden></p></div>
   </section>`;
   main.querySelector('#again').addEventListener('click', () => { round = null; showHome(); start(); });
+  main.querySelector('#share-app').addEventListener('click', async () => {
+    const status = main.querySelector('#app-share-status');
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: 'Get Bent', text: 'Which company will Bending Spoons buy next?', url: GAME_URL });
+      } else {
+        await navigator.clipboard.writeText(GAME_URL);
+        status.textContent = 'Link copied.'; status.hidden = false;
+      }
+    } catch (error) {
+      if (ticket !== epoch || error.name === 'AbortError') return;
+      status.textContent = GAME_URL; status.hidden = false;
+    }
+  });
   main.querySelector('.leaderboard').after(alreadyBent());
   focusMain();
   say('All four votes saved. Your share card and the community leaderboard are ready below.');
@@ -247,7 +307,7 @@ async function prepareCard(ids, ticket) {
     main.querySelector('#card-preview').replaceChildren(image);
     const nativeShare = canShareCard(file);
     button.disabled = false;
-    button.innerHTML = `${nativeShare ? 'Share card' : 'Save card'}${nativeShare ? shareIcon : downloadIcon}`;
+    button.innerHTML = `Share card${shareIcon}`;
     const download = main.querySelector('#download-card');
     download.hidden = !nativeShare;
     main.querySelector('.card-actions').classList.toggle('single-action', !nativeShare);
@@ -278,15 +338,34 @@ async function loadLeaderboard(picks, ticket) {
   try {
     const data = await api('leaderboard');
     if (ticket !== epoch) return;
-    const entries = data.companies.filter(item => byId[item.id]);
-    target.innerHTML = `<div class="board-header" aria-hidden="true"><span>#</span><span>Company</span><span>Duels</span><span>Elo</span></div>
-      <ol class="board" aria-label="Community Elo leaderboard"></ol>
-      <details class="elo-details"><summary>How the ranking works</summary><p>Each vote is a head-to-head win. Beating a higher-rated company earns more Elo. Everyone starts at 1,500, with K = 32. Companies with no duels are unranked. Early rankings can move a lot.</p><p>These are community guesses, not acquisition probabilities. Your picks are marked below each company name.</p></details>
-      <p class="results-status">${data.votes.toLocaleString('en-US')} ${data.votes === 1 ? 'vote' : 'votes'} cast</p>`;
+    target.replaceChildren();
+    const boards = node('div', 'parallel-boards');
+    target.append(boards);
+    renderBoard(boards, 'Players', data, picks);
+    renderBoard(boards, 'Luna / Decision', data.luna, new Set());
+  } catch (error) {
+    if (ticket !== epoch) return;
+    target.replaceChildren(node('p', 'error', error.message));
+    const retry = node('button', 'text-action', 'Retry leaderboards');
+    retry.onclick = () => loadLeaderboard(picks, ticket); target.append(retry);
+  }
+}
+
+function renderBoard(parent, title, data, picks) {
+    const section = node('section', 'ranking');
+    const heading = node('h3', '', title);
+    section.append(heading);
+    parent.append(section);
+    if (!data?.votes) { section.append(node('p', 'results-status', 'No votes yet.')); return; }
+    section.append(node('p', 'board-total', `${data.votes.toLocaleString('en-US')} ${data.votes === 1 ? 'vote' : 'votes'}`));
+    const list = node('ol', 'board');
+    list.setAttribute('aria-label', `${title} Elo leaderboard`);
+    section.append(list);
+    const entries = data.companies.filter(item => byId[item.id] && item.matches > 0);
     let rank = 0;
     let previous = null;
     let position = 0;
-    for (const item of [...entries.filter(item => item.matches > 0), ...entries.filter(item => item.matches === 0)]) {
+    for (const item of entries) {
       position++;
       const rating = Math.round(item.rating);
       if (rating !== previous) rank = position;
@@ -295,21 +374,14 @@ async function loadLeaderboard(picks, ticket) {
       const row = node('li', `board-row${item.matches ? '' : ' unranked'}`);
       const number = node('span', 'rank', item.matches ? String(rank).padStart(2, '0') : '·');
       const identity = node('span', 'board-company');
-      const img = node('img'); img.src = `/bending/logos/${company.icon}.svg`; img.alt = ''; img.width = 23; img.height = 23;
+      const img = node('img', company.color === '#111111' ? 'monochrome' : ''); img.src = `/bending/logos/${company.icon}.svg`; img.alt = ''; img.width = 23; img.height = 23;
       const name = node('span', 'board-name', company.name);
       if (picks.has(item.id)) name.append(node('span', 'your-pick', 'Your pick'));
       identity.append(img, name);
-      const matches = node('span', 'match-count', String(item.matches)); matches.setAttribute('aria-label', `${item.matches} duels`);
       const score = node('span', 'rating', item.matches ? rating.toLocaleString('en-US') : 'N/A');
       score.setAttribute('aria-label', item.matches ? `${rating} Elo` : 'Unranked');
-      row.append(number, identity, matches, score); target.querySelector('.board').append(row);
+      row.append(number, identity, score); list.append(row);
     }
-  } catch (error) {
-    if (ticket !== epoch) return;
-    target.replaceChildren(node('p', 'error', error.message));
-    const retry = node('button', 'text-action', 'Retry leaderboard');
-    retry.onclick = () => loadLeaderboard(picks, ticket); target.append(retry);
-  }
 }
 
 document.querySelector('.wordmark').addEventListener('click', event => { event.preventDefault(); showHome(); focusMain(); });

@@ -9,4 +9,5 @@ await writeFile(`${host}/worker/bending/api.js`, (await readFile('worker/api.js'
 await cp('src/companies.js', `${host}/worker/bending/companies.js`);
 await cp('migrations/0007_bending.sql', `${host}/migrations/0007_bending.sql`);
 await cp('migrations/0008_bending_startups.sql', `${host}/migrations/0008_bending_startups.sql`);
+await cp('migrations/0009_bending_luna.sql', `${host}/migrations/0009_bending_luna.sql`);
 console.log(`Copied assets, API and migration to ${host}. See README for the host route and binding.`);
