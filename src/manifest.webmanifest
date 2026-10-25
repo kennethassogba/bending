@@ -1,0 +1,17 @@
+{
+  "id": "/bending/",
+  "name": "Get Bent",
+  "short_name": "Get Bent",
+  "description": "Which company will Bending Spoons buy next? Four duels and a community Elo ranking.",
+  "lang": "en",
+  "start_url": "/bending/",
+  "scope": "/bending/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
+  "icons": [
+    { "src": "/bending/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/bending/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/bending/icon-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "name": "get-bent",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/dev.mjs",
+    "test": "node --test --test-concurrency=1 tests/*.test.mjs",
+    "integrate": "node scripts/integrate.mjs"
+  },
+  "devDependencies": {
+    "miniflare": "5.20261006.0-alpha"
+  },
+  "overrides": {
+    "sharp": "0.35.5",
+    "undici": "7.30.1"
+  }
+}
