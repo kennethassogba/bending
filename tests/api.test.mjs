@@ -14,7 +14,11 @@ before(async () => {
   await db.prepare(sql.slice(at)).run();
 });
 after(async () => { await mf?.dispose(); });
-const request = (path, data, headers = {}) => mf.dispatchFetch(`http://localhost/bending/api/${path}`, data === undefined ? {} : { method: 'POST', headers: { Origin: 'http://localhost', 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(data) });
+const request = async (path, data, headers = {}) => {
+  const response = await mf.dispatchFetch(`http://localhost/bending/api/${path}`, data === undefined ? {} : { method: 'POST', headers: { Origin: 'http://localhost', 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(data) });
+  // Fully consume the local HTTP response even in tests that only inspect status.
+  return new Response(await response.arrayBuffer(), { status: response.status, headers: response.headers });
+};
 const create = async () => (await request('round', {})).json();
 const vote = (round, duel, winner = round.pairs[duel][0]) => request('vote', { roundId: round.id, duel, winner });
 
@@ -73,6 +77,15 @@ test('forged company, round, origin, invalid and oversized votes do not count', 
   assert.equal((await request('vote', { roundId: round.id, duel: 0, winner: other })).status, 400);
   assert.equal((await request('round', {}, { Origin: 'https://evil.example' })).status, 403);
   assert.equal((await request('vote', { data: 'x'.repeat(2000) })).status, 400);
+  const stream = new ReadableStream({ start(controller) {
+    controller.enqueue(new TextEncoder().encode('x'.repeat(700)));
+    controller.enqueue(new TextEncoder().encode('x'.repeat(700)));
+    controller.close();
+  } });
+  const streamed = await handleBending(new Request('http://localhost/bending/api/vote', {
+    method: 'POST', headers: { Origin: 'http://localhost', 'Content-Type': 'application/json' }, body: stream, duplex: 'half',
+  }), { UPDATES_DB: db });
+  assert.equal(streamed.status, 400);
   assert.equal((await request('vote', { roundId: crypto.randomUUID(), duel: 0, winner: 'notion' })).status, 410);
   assert.equal((await request('round?id=not-an-id')).status, 404);
   assert.equal((await request('vote', null)).status, 400);

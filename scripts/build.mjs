@@ -4,7 +4,7 @@ import { companies } from '../src/companies.js';
 
 await mkdir('dist', { recursive: true });
 await cp('src', 'dist', { recursive: true });
-const paths = ['index.html', 'app.js', 'style.css', 'spoon.js', 'companies.js'];
+const paths = ['index.html', 'app.js', 'style.css', 'spoon.js', 'companies.js', 'sw.js', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png', 'icon-maskable.png', 'inter-latin.woff2', ...companies.map(company => `logos/${company.icon}.svg`)];
 const version = createHash('sha256');
 for (const path of paths) version.update(await readFile(`src/${path}`));
 const hash = version.digest('hex').slice(0, 12);

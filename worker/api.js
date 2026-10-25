@@ -17,17 +17,20 @@ export function makePairs(random = () => crypto.getRandomValues(new Uint32Array(
 
 async function body(request) {
   if (!request.headers.get('Content-Type')?.startsWith('application/json')) throw new Error('json');
+  if (Number(request.headers.get('Content-Length')) > 1024) throw new Error('size');
   const reader = request.body?.getReader();
   if (!reader) throw new Error('json');
   let size = 0;
   const chunks = [];
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.length;
-    if (size > 1024) { await reader.cancel(); throw new Error('size'); }
-    chunks.push(value);
-  }
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.length;
+      if (size > 1024) throw new Error('size');
+      chunks.push(value);
+    }
+  } finally { reader.releaseLock(); }
   const data = new Uint8Array(size);
   let offset = 0;
   for (const chunk of chunks) { data.set(chunk, offset); offset += chunk.length; }

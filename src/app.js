@@ -83,7 +83,7 @@ function showHome() {
   epoch++; view = 'home'; pending = false; chosen = null;
   const resume = !!store.get(key);
   main.innerHTML = `<section class="home" aria-labelledby="home-title">
-    <h1 id="home-title">Who's getting<br>bent?</h1>
+    <h1 id="home-title">Who's getting <br>bent?</h1>
     <p class="intro">Which company will <strong>Bending Spoons</strong> buy next?</p>
     <div class="home-art" aria-hidden="true"><span class="stamp">BENT</span></div>
     <div class="home-actions"><button class="primary" id="start">${resume ? 'Continue round' : 'Pick the next acquisition'}${arrow}</button>

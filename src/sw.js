@@ -1,5 +1,5 @@
 const cacheName = 'get-bent-__VERSION__';
-const shell = ['/bending/', '/bending/style.css', '/bending/app.js', '/bending/companies.js', '/bending/spoon.js', '/bending/inter-latin.woff2', '/bending/icon.svg', '/bending/manifest.webmanifest', ...__LOGOS__];
+const shell = ['/bending/', '/bending/style.css', '/bending/app.js', '/bending/companies.js', '/bending/spoon.js', '/bending/inter-latin.woff2', '/bending/icon.svg', '/bending/icon-192.png', '/bending/icon-512.png', '/bending/icon-maskable.png', '/bending/manifest.webmanifest', ...__LOGOS__];
 self.addEventListener('install', event => { event.waitUntil(caches.open(cacheName).then(cache => cache.addAll(shell))); self.skipWaiting(); });
 self.addEventListener('activate', event => {
   event.waitUntil(Promise.all([
