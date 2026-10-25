@@ -159,7 +159,6 @@ function showDuel() {
     <div class="duel"><span class="vs" aria-hidden="true">OR</span></div>
     <p class="duel-caption">Tap a spoon. Seal its fate.</p>
     <div class="game-status" role="status" aria-live="polite"></div>
-    <div class="duel-actions"></div>
   </section>`;
   const targets = main.querySelector('.duel');
   pair.forEach((id, i) => {
@@ -220,9 +219,8 @@ async function revealLuna(duel, ticket) {
   if (ticket !== epoch) return;
   pending = true;
   const status = main.querySelector('.game-status');
-  const actions = main.querySelector('.duel-actions');
-  actions.replaceChildren();
   status.className = 'game-status'; status.textContent = 'Luna is picking...';
+  let revealed = false;
   try {
     let data;
     for (let attempt = 0; attempt < 12; attempt++) {
@@ -235,28 +233,19 @@ async function revealLuna(duel, ticket) {
     if (!data.vote || !round.pairs[duel].includes(data.vote.winner)) throw new Error('Luna is unavailable. Try again.');
     const pick = main.querySelector(`[data-company="${data.vote.winner}"]`);
     pick.classList.add('luna-selected');
-    const label = pick.querySelector('.vote-label');
-    if (label) label.textContent = 'You + Luna';
-    else pick.append(node('span', 'vote-label', 'Luna'));
-    status.textContent = `Luna / Decision picked ${byId[data.vote.winner].name}.`;
-    say(status.textContent);
+    status.className = 'game-status decision-bubble';
+    status.style.setProperty('--pick-side', round.pairs[duel].indexOf(data.vote.winner) === 0 ? '25%' : '75%');
+    status.replaceChildren(node('span', 'decision-label', 'Luna / Decision'), node('strong', '', byId[data.vote.winner].name));
+    revealed = true;
   } catch {
     if (ticket !== epoch) return;
     status.textContent = 'Luna is unavailable.';
-    const retry = node('button', 'text-action', 'Retry Luna');
-    retry.addEventListener('click', () => revealLuna(duel, ticket));
-    actions.append(retry);
   }
+  // Keep the reveal readable, then continue without another tap.
+  await new Promise(resolve => setTimeout(resolve, revealed ? 1600 : 900));
   if (ticket !== epoch) return;
-  pending = false;
-  const next = node('button', 'primary', round.votes.length === 4 ? 'See rankings' : 'Next duel');
-  next.innerHTML += arrow;
-  next.addEventListener('click', async () => {
-    if (round.votes.length === 4) { store.remove(key); await showResults(); }
-    else { showDuel(); focusMain(); }
-  });
-  actions.append(next);
-  next.focus({ preventScroll: true });
+  if (round.votes.length === 4) { store.remove(key); await showResults(); }
+  else { showDuel(); focusMain(); }
 }
 
 async function showResults() {

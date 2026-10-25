@@ -2,7 +2,7 @@
 
 [Play at keff.uk/bending](https://keff.uk/bending/).
 
-Which company will Bending Spoons buy next? Vote in four head-to-head duels. The selected company's spoon bends, then Luna / Decision reveals its own pick. Continue through four duels to see separate player and Luna Elo leaderboards.
+Which company will Bending Spoons buy next? Vote in four head-to-head duels. The selected company's spoon bends, then a bubble reveals Luna / Decision's pick before advancing automatically. After four duels, see separate player and Luna Elo leaderboards.
 
 English only, mobile first, installable as a standalone PWA. Light by default, with a persistent dark-mode option. No account or runtime framework. The server calls OpenAI Decisions with gpt-6-luna; the API key never reaches the browser. The spoon is an SVG mesh animated with `requestAnimationFrame`; reduced motion shows the final bent shape without movement. Sound is optional and generated locally.
 
@@ -39,7 +39,7 @@ Open `http://127.0.0.1:8788/bending/`. The local server uses Miniflare with a lo
 
 A saved human vote unlocks POST /bending/api/decision for that duel. The server supplies only the two companies, the date and a short acquisition context to native /v1/decisions with gpt-6-luna. Human choices and Elo scores are excluded from the prompt. This is a speculative pick without live news, not a prediction backed by current deal research.
 
-A database lease prevents simultaneous calls for the same duel. Successful results and Elo updates are idempotent. Provider failures and refusals never create votes; retry or continue without Luna. Luna uses separate company ratings and a separate atomic Elo trigger. The player's vote is saved before any model request.
+A database lease prevents simultaneous calls for the same duel. Successful results and Elo updates are idempotent. Provider failures and refusals never create votes; the game continues automatically without a model vote. Luna uses separate company ratings and a separate atomic Elo trigger. The player's vote is saved before any model request.
 
 Configure OPENAI_API_KEY as a Worker secret. For local development, pass OPENAI_API_KEY through the environment. Without a key, human voting still works and Luna reports unavailable. No credentials are included in assets or source control.
 
