@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { makePairs, handleBending } from '../worker/api.js';
+import { companies } from '../src/companies.js';
 
 let mf, db;
 before(async () => {
@@ -12,14 +13,16 @@ before(async () => {
   const at = sql.indexOf('CREATE TRIGGER');
   await db.exec(sql.slice(0, at).replace(/--[^\n]*/g, '').replace(/\n/g, ' '));
   await db.prepare(sql.slice(at)).run();
+  await db.exec((await readFile('migrations/0008_bending_startups.sql', 'utf8')).replace(/--[^\n]*/g, '').replace(/\n/g, ' '));
 });
 after(async () => { await mf?.dispose(); });
 const request = async (path, data, headers = {}) => {
-  const response = await mf.dispatchFetch(`http://localhost/bending/api/${path}`, data === undefined ? {} : { method: 'POST', headers: { Origin: 'http://localhost', 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(data) });
+  // The local bridge may close a rejected upload; do not reuse its HTTP socket.
+  const response = await mf.dispatchFetch(`http://localhost/bending/api/${path}`, data === undefined ? { headers: { Connection: 'close' } } : { method: 'POST', headers: { Connection: 'close', Origin: 'http://localhost', 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(data) });
   // Fully consume the local HTTP response even in tests that only inspect status.
   return new Response(await response.arrayBuffer(), { status: response.status, headers: response.headers });
 };
-const create = async () => (await request('round', {})).json();
+const create = async () => (await request('round', { catalog: 2 })).json();
 const vote = (round, duel, winner = round.pairs[duel][0]) => request('vote', { roundId: round.id, duel, winner });
 
 test('a round has four distinct matchups and eight unique companies', () => {
@@ -28,6 +31,18 @@ test('a round has four distinct matchups and eight unique companies', () => {
     assert.equal(pairs.length, 4);
     assert.equal(new Set(pairs.flat()).size, 8);
   }
+});
+
+test('expanded catalog has logos and preserves compatibility with installed clients', async () => {
+  assert.equal(companies.length, 40);
+  assert.equal(new Set(companies.map(company => company.id)).size, 40);
+  for (const company of companies) assert.ok((await readFile(`src/logos/${company.icon}.svg`, 'utf8')).includes('<svg'));
+  const old = await (await request('round', {})).json();
+  const legacy = new Set(companies.slice(0, 12).map(company => company.id));
+  assert.ok(old.pairs.flat().every(id => legacy.has(id)));
+  const before = await db.prepare('SELECT SUM(rating) AS rating,SUM(matches) AS matches FROM bending_companies').first();
+  await db.exec((await readFile('migrations/0008_bending_startups.sql', 'utf8')).replace(/--[^\n]*/g, '').replace(/\n/g, ' '));
+  assert.deepEqual(await db.prepare('SELECT SUM(rating) AS rating,SUM(matches) AS matches FROM bending_companies').first(), before);
 });
 
 test('four votes persist, resume correctly, and conserve Elo', async () => {
@@ -44,7 +59,8 @@ test('four votes persist, resume correctly, and conserve Elo', async () => {
   const board = await (await request('leaderboard')).json();
   assert.equal(board.votes, 4);
   assert.equal(board.companies.reduce((sum, item) => sum + item.matches, 0), 8);
-  assert.equal(board.companies.reduce((sum, item) => sum + item.rating, 0), 18000);
+  assert.equal(board.companies.length, companies.length);
+  assert.equal(board.companies.reduce((sum, item) => sum + item.rating, 0), companies.length * 1500);
   const winner = board.companies.find(item => item.id === round.pairs[0][0]);
   assert.equal(winner.rating, 1516);
 });
@@ -76,7 +92,13 @@ test('forged company, round, origin, invalid and oversized votes do not count', 
   const other = makePairs().flat().find(id => !round.pairs[0].includes(id));
   assert.equal((await request('vote', { roundId: round.id, duel: 0, winner: other })).status, 400);
   assert.equal((await request('round', {}, { Origin: 'https://evil.example' })).status, 403);
-  assert.equal((await request('vote', { data: 'x'.repeat(2000) })).status, 400);
+  // Test early rejection at the handler boundary: Miniflare's HTTP bridge can
+  // reset a socket while rejecting a not-yet-finished oversized upload.
+  const oversized = JSON.stringify({ data: 'x'.repeat(2000) });
+  const rejected = await handleBending(new Request('http://localhost/bending/api/vote', {
+    method: 'POST', headers: { Origin: 'http://localhost', 'Content-Type': 'application/json', 'Content-Length': String(oversized.length) }, body: oversized,
+  }), { UPDATES_DB: db });
+  assert.equal(rejected.status, 400);
   const stream = new ReadableStream({ start(controller) {
     controller.enqueue(new TextEncoder().encode('x'.repeat(700)));
     controller.enqueue(new TextEncoder().encode('x'.repeat(700)));

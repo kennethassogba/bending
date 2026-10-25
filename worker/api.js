@@ -6,8 +6,8 @@ const reply = (value, status = 200, headers = {}) => Response.json(value, {
   status, headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...headers },
 });
 
-export function makePairs(random = () => crypto.getRandomValues(new Uint32Array(1))[0] / 2 ** 32) {
-  const pool = [...ids];
+export function makePairs(random = () => crypto.getRandomValues(new Uint32Array(1))[0] / 2 ** 32, catalog = 2) {
+  const pool = catalog === 2 ? [...ids] : [...ids].slice(0, 12);
   for (let i = pool.length - 1; i > 0; i--) {
     const j = Math.floor(random() * (i + 1));
     [pool[i], pool[j]] = [pool[j], pool[i]];
@@ -54,8 +54,12 @@ export async function handleBending(request, env) {
   }
 
   if (route === '/bending/api/round' && request.method === 'POST') {
+    let input;
+    try { input = await body(request); }
+    catch { return reply({ error: 'Could not start a round. Please try again.' }, 400); }
     const id = crypto.randomUUID();
-    const pairs = makePairs();
+    // Existing installed clients only know the original 12 logos and names.
+    const pairs = makePairs(undefined, input?.catalog === 2 ? 2 : 1);
     await db.prepare('INSERT INTO bending_rounds(id,pairs,created_at) VALUES(?,?,?)')
       .bind(id, JSON.stringify(pairs), Date.now()).run();
     return reply({ id, pairs, votes: [] }, 201);

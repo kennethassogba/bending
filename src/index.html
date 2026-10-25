@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#ffffff">
+  <meta name="theme-color" content="#0e0f13">
   <meta name="description" content="Which company will Bending Spoons buy next? Pick a company in four duels. Bend its spoon. See the crowd's Elo ranking.">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -19,6 +19,7 @@
   <link rel="manifest" href="/bending/manifest.webmanifest">
   <link rel="icon" href="/bending/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/bending/icon-192.png">
+  <script src="/bending/theme.js"></script>
   <link rel="stylesheet" href="/bending/style.css">
   <title>Get Bent. Who will Bending Spoons buy next?</title>
 </head>
@@ -29,6 +30,9 @@
       <a class="wordmark" href="/bending/" aria-label="Get Bent home">GET BENT<span class="wordmark-dot">.</span></a>
       <div class="header-actions">
         <button id="install" class="quiet" hidden>Install</button>
+        <button id="theme" class="icon-button" aria-label="Switch to light mode">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></svg>
+        </button>
         <button id="sound" class="icon-button" aria-label="Turn sound on" aria-pressed="false">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4zM16 9l5 6m0-6-5 6"/></svg>
         </button>
@@ -36,7 +40,7 @@
     </header>
     <p id="install-help" class="install-help" hidden>In Safari, tap Share, then Add to Home Screen.</p>
     <main id="main" tabindex="-1"></main>
-    <footer class="footer"><a href="https://keff.uk/">k_eff</a><span>Unofficial. Community guesses.</span><a href="https://github.com/kennethassogba/bending" aria-label="Get Bent source on GitHub">Source</a></footer>
+    <footer class="footer"><a href="https://keff.uk/">k_eff</a><a href="https://github.com/kennethassogba/bending" aria-label="Get Bent source on GitHub">Source</a></footer>
   </div>
   <div id="announcer" class="sr-only" role="status" aria-live="polite"></div>
   <noscript><p>This game needs JavaScript to record your votes.</p></noscript>

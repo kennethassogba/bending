@@ -4,7 +4,11 @@
 
 Which company will Bending Spoons buy next? Vote in four head-to-head duels. The selected company's spoon bends, then the next duel appears. The shared Elo leaderboard appears after the fourth saved vote.
 
-English only, mobile first, installable as a standalone PWA. No account, runtime framework, third-party requests or model API. The spoon is an SVG mesh animated with `requestAnimationFrame`; reduced motion shows the final bent shape without movement. Sound is optional and generated locally.
+English only, mobile first, installable as a standalone PWA. Dark by default, with a persistent light-mode option. No account, runtime framework, third-party requests or model API. The spoon is an SVG mesh animated with `requestAnimationFrame`; reduced motion shows the final bent shape without movement. Sound is optional and generated locally.
+
+After four saved votes, a personal PNG card shows the four selected companies on bent spoons, with the game URL. It is generated locally at 1080 x 1350, with company paths embedded in the image. Mobile browsers that support file sharing open their native share sheet; other browsers download the card. The image is prepared before the share tap to preserve transient user activation.
+
+The expandable Already bent section lists ten completed acquisitions, reported peak valuations where verified, and purchase consideration with source links. Missing values remain unavailable. Headline deal values, enterprise values, equity values and acquisition accounting consideration are distinguished. Sources were reviewed on October 25, 2026; this is a curated snapshot, not an automatic acquisition feed.
 
 ## Local development
 
@@ -22,6 +26,7 @@ Open `http://127.0.0.1:8788/bending/`. The local server uses Miniflare with a lo
 ## Voting
 
 - Four randomly sampled pairs, eight unique companies per round. Scores stay hidden during voting.
+- The catalog contains 40 companies. New clients request catalog version 2. Existing installed clients without a version continue to receive the original 12 companies until they refresh.
 - Every company starts at 1,500 Elo. The standard logistic Elo update uses K = 32.
 - A SQLite trigger calculates and applies the rating change atomically, using the current ratings. Concurrent votes cannot overwrite one another.
 - A unique `(round_id, duel)` key makes retries idempotent. A conflicting retry is rejected. Duels must be completed in order.
@@ -39,12 +44,13 @@ npm run build
 npm run integrate -- /path/to/keff.uk
 ```
 
-The integration script copies `dist/` to `public/bending/`, the API and company catalog to `worker/bending/`, and the additive schema to `migrations/0007_bending.sql`. It does not deploy or modify the host's existing routes. The host imports `handleBending` from `./bending/api.js` and delegates `/bending/api/*` to it. `/bending` redirects to `/bending/`. The service worker is scoped to `/bending/`, and does not control the rest of the domain.
+The integration script copies `dist/` to `public/bending/`, the API and company catalog to `worker/bending/`, and the additive migrations to `migrations/0007_bending.sql` and `migrations/0008_bending_startups.sql`. It does not deploy or modify the host's existing routes. The host imports `handleBending` from `./bending/api.js` and delegates `/bending/api/*` to it. `/bending` redirects to `/bending/`. The service worker is scoped to `/bending/`, and does not control the rest of the domain.
 
 Apply only the game schema against the host database with the host's installed Wrangler CLI:
 
 ```sh
 wrangler d1 execute keff-updates --remote --file migrations/0007_bending.sql
+wrangler d1 execute keff-updates --remote --file migrations/0008_bending_startups.sql
 ```
 
 This file is idempotent and only adds tables prefixed `bending_`. Do not apply unrelated pending portfolio migrations as part of this deployment. Build, test and deploy the host through its existing workflow. Game assets are tracked in the host, so its usual build preserves them. Subsequent game releases repeat the integration step and commit the copied assets with the host change.
@@ -57,6 +63,6 @@ This file is idempotent and only adds tables prefixed `bending_`. Do not apply u
 
 The candidate list is a meme, not a report of acquisition talks. Known Bending Spoons acquisitions and announced deals are excluded from the candidate pool. Review `src/companies.js` when ownership changes. Portfolio reference: [Bending Spoons](https://www.bendingspoons.com/), reviewed October 25, 2026. No automatic acquisition feed is claimed.
 
-Company marks come from [Simple Icons](https://simpleicons.org/) (CC0), rendered in a single brand color. Canva uses Simple Icons 11.15.0; the other marks were retrieved from the upstream catalog on October 25, 2026. Brand names and marks belong to their respective owners. Get Bent is not affiliated with Bending Spoons or the featured companies. Inter is licensed under the SIL Open Font License, included in `src/FONT-LICENSE.txt`.
+Company marks come from [Simple Icons](https://simpleicons.org/) (CC0), rendered in a single color. Green marks are recolored to respect the project palette. Canva uses Simple Icons 11.15.0; the other marks were retrieved from the upstream catalog on October 25, 2026. Brand names and marks belong to their respective owners. Get Bent is not affiliated with Bending Spoons or the featured companies. Inter is licensed under the SIL Open Font License, included in `src/FONT-LICENSE.txt`.
 
 Application source: MIT.

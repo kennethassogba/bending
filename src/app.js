@@ -1,5 +1,7 @@
-import { companies, byId } from './companies.js';
+import { byId } from './companies.js';
 import { spoon, bendSpoon } from './spoon.js';
+import { createShareCard, canShareCard, downloadCard, shareText } from './share-card.js';
+import { alreadyBent } from './already-bent.js';
 
 const main = document.querySelector('main');
 const announcer = document.querySelector('#announcer');
@@ -12,14 +14,34 @@ let epoch = 0;
 let audio = null;
 let sound = false;
 let installEvent = null;
+let cardUrl = null;
 const arrow = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h16m-6-6 6 6-6 6"/></svg>';
 const shareIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V3m-4 4 4-4 4 4M6 11H4v10h16V11h-2"/></svg>';
+const downloadIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M4 17v4h16v-4"/></svg>';
 const store = {
   get(name) { try { return localStorage.getItem(name); } catch { return null; } },
   set(name, value) { try { localStorage.setItem(name, value); } catch { /* Private browsing can disable storage. */ } },
   remove(name) { try { localStorage.removeItem(name); } catch { /* The in-memory round still works. */ } },
 };
 sound = store.get('get-bent-sound') === 'on';
+
+function updateTheme() {
+  const dark = document.documentElement.dataset.theme !== 'light';
+  const button = document.querySelector('#theme');
+  button.setAttribute('aria-label', dark ? 'Switch to light mode' : 'Switch to dark mode');
+  button.innerHTML = dark
+    ? '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></svg>'
+    : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 14.5A8.8 8.8 0 0 1 9.5 3.5a8.8 8.8 0 1 0 11 11Z"/></svg>';
+}
+document.querySelector('#theme').addEventListener('click', () => {
+  const theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = theme;
+  document.querySelector('meta[name="theme-color"]').content = theme === 'dark' ? '#0e0f13' : '#ffffff';
+  store.set('get-bent-theme', theme); updateTheme();
+});
+updateTheme();
+
+function releaseCard() { if (cardUrl) { URL.revokeObjectURL(cardUrl); cardUrl = null; } }
 
 function say(text) { announcer.textContent = text; }
 function focusMain() { main.focus({ preventScroll: true }); window.scrollTo(0, 0); }
@@ -81,17 +103,19 @@ updateSound();
 
 function showHome() {
   epoch++; view = 'home'; pending = false; chosen = null;
+  releaseCard();
   const resume = !!store.get(key);
   main.innerHTML = `<section class="home" aria-labelledby="home-title">
     <h1 id="home-title">Who's getting <br>bent?</h1>
     <p class="intro">Which company will <strong>Bending Spoons</strong> buy next?</p>
     <div class="home-art" aria-hidden="true"><span class="stamp">BENT</span></div>
     <div class="home-actions"><button class="primary" id="start">${resume ? 'Continue round' : 'Pick the next acquisition'}${arrow}</button>
-      <p class="action-note">4 duels. Pick one company each time.</p><p id="home-error" class="error" role="alert" hidden></p></div>
+      <p id="home-error" class="error" role="alert" hidden></p></div>
   </section>`;
   const art = main.querySelector('.home-art');
   art.prepend(spoon(byId.notion), spoon(byId.discord, 1));
   main.querySelector('#start').addEventListener('click', start);
+  main.querySelector('.home').append(alreadyBent());
 }
 
 async function start() {
@@ -110,7 +134,7 @@ async function start() {
         store.remove(key); round = null;
       }
     }
-    if (!saved || !round) round = await api('round', { method: 'POST', body: '{}' });
+    if (!saved || !round) round = await api('round', { method: 'POST', body: JSON.stringify({ catalog: 2 }) });
     if (ticket !== epoch) return;
     store.set(key, round.id); pending = false;
     if (round.votes.length === 4) { store.remove(key); await showResults(); }
@@ -191,24 +215,74 @@ async function vote(winner, retry = false) {
 
 async function showResults() {
   const ticket = ++epoch; view = 'results'; pending = false;
-  main.innerHTML = '<p class="loading" role="status">Counting the bent spoons...</p>';
+  releaseCard();
+  const ids = round.votes.map(vote => vote.winner);
+  main.innerHTML = `<section class="results" aria-labelledby="results-title">
+    <h1 id="results-title">You bent these.</h1>
+    <div class="card-preview" id="card-preview"><p role="status">Making your card...</p></div>
+    <div class="card-actions"><button class="primary" id="share-card" disabled>Making your card...</button><button class="share" id="download-card" aria-label="Download your card" hidden>${downloadIcon}</button></div>
+    <p class="results-status" id="share-status" role="status"></p>
+    <section class="leaderboard" aria-labelledby="board-title"><h2 id="board-title">The crowd's picks</h2><div id="leaderboard-content"><p class="results-status" role="status">Loading leaderboard...</p></div></section>
+    <div class="results-actions"><button class="secondary" id="again">Bend some more${arrow}</button></div>
+  </section>`;
+  main.querySelector('#again').addEventListener('click', () => { round = null; showHome(); start(); });
+  main.querySelector('.leaderboard').after(alreadyBent());
   focusMain();
+  say('All four votes saved. Your share card and the community leaderboard are ready below.');
+  await Promise.all([prepareCard(ids, ticket), loadLeaderboard(new Set(ids), ticket)]);
+}
+
+async function prepareCard(ids, ticket) {
+  const button = main.querySelector('#share-card');
+  const status = main.querySelector('#share-status');
+  button.disabled = true; button.textContent = 'Making your card...';
+  status.textContent = '';
+  try {
+    const file = await createShareCard(ids);
+    if (ticket !== epoch) return;
+    releaseCard(); cardUrl = URL.createObjectURL(file);
+    const image = node('img'); image.src = cardUrl;
+    image.alt = `I bent ${ids.map(id => byId[id].name).join(', ')}. Four bent spoons. Play at keff.uk/bending.`;
+    image.width = 1080; image.height = 1350;
+    main.querySelector('#card-preview').replaceChildren(image);
+    const nativeShare = canShareCard(file);
+    button.disabled = false;
+    button.innerHTML = `${nativeShare ? 'Share card' : 'Save card'}${nativeShare ? shareIcon : downloadIcon}`;
+    const download = main.querySelector('#download-card');
+    download.hidden = !nativeShare;
+    main.querySelector('.card-actions').classList.toggle('single-action', !nativeShare);
+    const save = () => { downloadCard(file); status.textContent = 'Download started.'; };
+    download.onclick = save;
+    button.onclick = async () => {
+      if (!nativeShare) { save(); return; }
+      try {
+        // The PNG is prepared before the tap, preserving native share activation on iOS.
+        await navigator.share({ files: [file], title: 'My Get Bent picks', text: shareText(ids) });
+      } catch (error) {
+        if (ticket !== epoch || error.name === 'AbortError') return;
+        status.textContent = 'Sharing is unavailable. Use the download button to save your card.';
+      }
+    };
+  } catch {
+    if (ticket !== epoch) return;
+    main.querySelector('#card-preview').replaceChildren(node('p', '', 'Could not create your card.'));
+    status.textContent = 'Check your connection and try again.';
+    button.disabled = false; button.textContent = 'Retry card';
+    button.onclick = () => prepareCard(ids, ticket);
+  }
+}
+
+async function loadLeaderboard(picks, ticket) {
+  const target = main.querySelector('#leaderboard-content');
+  target.innerHTML = '<p class="results-status" role="status">Loading leaderboard...</p>';
   try {
     const data = await api('leaderboard');
     if (ticket !== epoch) return;
-    const picks = new Set(round?.votes.map(vote => vote.winner) || []);
     const entries = data.companies.filter(item => byId[item.id]);
-    main.innerHTML = `<section class="results" aria-labelledby="results-title">
-      <p class="eyebrow">Your 4 votes are in</p>
-      <h1 id="results-title">Next to get bent.</h1>
-      <p class="intro">The crowd's picks for <strong>Bending Spoons' next acquisition.</strong></p>
-      <div class="board-header" aria-hidden="true"><span>#</span><span>Company</span><span>Duels</span><span>Elo</span></div>
+    target.innerHTML = `<div class="board-header" aria-hidden="true"><span>#</span><span>Company</span><span>Duels</span><span>Elo</span></div>
       <ol class="board" aria-label="Community Elo leaderboard"></ol>
       <details class="elo-details"><summary>How the ranking works</summary><p>Each vote is a head-to-head win. Beating a higher-rated company earns more Elo. Everyone starts at 1,500, with K = 32. Companies with no duels are unranked. Early rankings can move a lot.</p><p>These are community guesses, not acquisition probabilities. Your picks are marked below each company name.</p></details>
-      <p class="results-status">${data.votes.toLocaleString('en-US')} ${data.votes === 1 ? 'vote' : 'votes'} cast</p>
-      <div class="results-actions"><button class="primary" id="again">Bend some more${arrow}</button><button class="share" id="share" aria-label="Share Get Bent">${shareIcon}</button></div>
-      <p class="results-status" id="share-status" role="status"></p>
-    </section>`;
+      <p class="results-status">${data.votes.toLocaleString('en-US')} ${data.votes === 1 ? 'vote' : 'votes'} cast</p>`;
     let rank = 0;
     let previous = null;
     let position = 0;
@@ -228,25 +302,13 @@ async function showResults() {
       const matches = node('span', 'match-count', String(item.matches)); matches.setAttribute('aria-label', `${item.matches} duels`);
       const score = node('span', 'rating', item.matches ? rating.toLocaleString('en-US') : 'N/A');
       score.setAttribute('aria-label', item.matches ? `${rating} Elo` : 'Unranked');
-      row.append(number, identity, matches, score); main.querySelector('.board').append(row);
+      row.append(number, identity, matches, score); target.querySelector('.board').append(row);
     }
-    main.querySelector('#again').addEventListener('click', () => { round = null; showHome(); start(); });
-    main.querySelector('#share').addEventListener('click', async () => {
-      const top = entries.find(item => item.matches > 0);
-      const share = { title: 'Get Bent', text: top ? `${byId[top.id].name} is top of the bend list. Who will Bending Spoons buy next?` : 'Who will Bending Spoons buy next?', url: 'https://keff.uk/bending/' };
-      try {
-        if (navigator.share) await navigator.share(share);
-        else { await navigator.clipboard.writeText(`${share.text}\n${share.url}`); main.querySelector('#share-status').textContent = 'Link copied.'; }
-      } catch (error) {
-        if (error.name !== 'AbortError') main.querySelector('#share-status').textContent = 'Share this link: keff.uk/bending/';
-      }
-    });
-    say('All four votes saved. The community Elo leaderboard is ready.');
   } catch (error) {
     if (ticket !== epoch) return;
-    main.innerHTML = '<div class="loading"><p role="alert"></p><button class="text-action">Retry leaderboard</button></div>';
-    main.querySelector('p').textContent = error.message;
-    main.querySelector('button').addEventListener('click', showResults);
+    target.replaceChildren(node('p', 'error', error.message));
+    const retry = node('button', 'text-action', 'Retry leaderboard');
+    retry.onclick = () => loadLeaderboard(picks, ticket); target.append(retry);
   }
 }
 

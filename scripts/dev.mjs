@@ -12,5 +12,6 @@ const sql = await readFile('migrations/0007_bending.sql', 'utf8');
 const triggerAt = sql.indexOf('CREATE TRIGGER');
 await db.exec(sql.slice(0, triggerAt).replace(/--[^\n]*/g, '').replace(/\n/g, ' '));
 await db.prepare(sql.slice(triggerAt)).run();
+await db.exec((await readFile('migrations/0008_bending_startups.sql', 'utf8')).replace(/--[^\n]*/g, '').replace(/\n/g, ' '));
 console.log(`Get Bent: ${await mf.ready}/bending/`);
 process.on('SIGINT', async () => { await mf.dispose(); process.exit(0); });
